@@ -25,22 +25,21 @@ class Report:
             raise NameError('Library directory not found at {0}'.format(self.LIB_PATH))
         self.config = config
         if not jpype.isJVMStarted():
-            classpath = [
-                os.path.join(self.LIB_PATH, "*"),
-                os.path.join(self.JDBC_PATH, "*"),
-            ]
-
-            if self.config.resource and os.path.isdir(self.config.resource):
-                classpath.append(os.path.join(self.config.resource, "*"))
-
-            if self.config.jvm_classpath:
-                classpath.append(self.config.jvm_classpath)
-
             if self.config.jvm_classpath is None:
                 jpype.startJVM("-Djava.system.class.loader=org.update4j.DynamicClassLoader",
                                "-Xmx{}".format(self.config.jvm_maxmem),
-                               classpath=classpath)
-
+                               classpath=[
+                                   os.path.join(self.LIB_PATH, "*"),
+                                   os.path.join(self.JDBC_PATH, "*"),
+                               ])
+            else:
+                jpype.startJVM("-Djava.system.class.loader=org.update4j.DynamicClassLoader",
+                               "-Xmx{}".format(self.config.jvm_maxmem),
+                               classpath=[
+                                   self.LIB_PATH,
+                                   self.JDBC_PATH,
+                                   self.config.jvm_classpath,
+                               ])
         self.Locale = jpype.JPackage('java').util.Locale
         self.jvJRLoader = jpype.JPackage('net').sf.jasperreports.engine.util.JRLoader
         self.JasperReport = jpype.JPackage('net').sf.jasperreports.engine.JasperReport
@@ -79,15 +78,6 @@ class Report:
         self.JRSaver = jpype.JPackage('net').sf.jasperreports.engine.util.JRSaver
         self.File = jpype.JPackage('java').io.File
         self.ApplicationClasspath = jpype.JPackage('br').com.acesseonline.classpath.ApplicationClasspath
-
-        if self.config.useJaxen:
-            self.DefaultJasperReportsContext = jpype.JPackage('net').sf.jasperreports.engine.DefaultJasperReportsContext
-            self.context = self.DefaultJasperReportsContext.getInstance();
-            self.JRPropertiesUtil = jpype.JPackage('net').sf.jasperreports.engine.JRPropertiesUtil
-            self.JRPropertiesUtil.getInstance(self.context).setProperty("net.sf.jasperreports.xpath.executer.factory",
-                "net.sf.jasperreports.engine.util.xml.JaxenXPathExecuterFactory");
-
-
         self.input_file = input_file
         self.defaultLocale = self.Locale.getDefault()
         if self.config.has_resource():
@@ -191,8 +181,6 @@ class Report:
                     self.config.jsonQuery = self.get_main_dataset_query()
                 db = Db()
                 ds = db.get_json_datasource(self.config)
-                if self.config.jsonLocale:
-                    ds.setLocale(self.LocaleUtils.toLocale(self.config.jsonLocale))
                 self.jasper_print = self.jvJasperFillManager.fillReport(self.jasper_report, parameters, ds)
             elif self.config.dbType == 'jsonql':
                 if self.config.jsonQLQuery is None:
@@ -228,13 +216,15 @@ class Report:
             raise NameError('Unable to create outputStream to {}: {}'.format(output_path, str(ex)))
 
     def export_pdf(self):
-        self.JasperExportManager.exportReportToPdfStream(self.jasper_print, self.get_output_stream('.pdf'))
-
+        outputstream = self.get_output_stream('.pdf')
+        self.JasperExportManager.exportReportToPdfStream(self.jasper_print, outputstream)
+        outputstream.flush() # if no buffer used, it can be ignored.
+        outputstream.close()
+        
     def export_rtf(self):
         exporter = self.JRRtfExporter()
         exporter.setExporterInput(self.SimpleExporterInput(self.jasper_print))
         exporter.setExporterOutput(self.SimpleWriterExporterOutput(self.get_output_stream('.rtf')))
-        exporter.exportReport()
 
     def export_docx(self):
         exporter = self.JRDocxExporter()
